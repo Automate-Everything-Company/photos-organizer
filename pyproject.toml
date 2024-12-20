@@ -1,0 +1,7 @@
+[project]
+name = "photos-organizer"
+version = "0.1.0"
+dependencies = [
+    "pillow>=11.0.0",
+    "streamlit>=1.41.1",
+]
