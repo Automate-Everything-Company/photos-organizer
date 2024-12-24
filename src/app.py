@@ -206,7 +206,7 @@ def create_folder_map(path: Path, prefix: str = "") -> str:
             try:
                 sub_items = item.iterdir()
                 if any(sub_items):
-                    tree.append(create_folder_map(item, next_prefix, is_last_item))
+                    tree.append(create_folder_map(item, next_prefix))
             except PermissionError:
                 tree.append(f"{next_prefix}└── (Permission Denied)")
         else:
