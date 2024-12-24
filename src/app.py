@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -19,12 +20,34 @@ register_heif_opener()
 class Photos(Enum):
     FIRST_PHOTOS = 5
 
+@dataclass
+class ProcessStats:
+    total_photos: int = 0
+    processed_folders: int = 0
+    processed_files: int = 0
+    skipped_files: int = 0
+    errors: int = 0
+
 class SortingType(Enum):
     YEARLY = "By Year (2024)"
     MONTHLY = "By Month (2024-03)"
     DAILY = "By Day (2024-03-24)"
     SEASON = "By Season (2024-Winter)"
 
+
+class StatusManager:
+    @staticmethod
+    def show_preview_stats(photos_count: int, folders_count: int) -> None:
+        st.success("✨ Preview generated successfully!")
+        st.write(f"Found {photos_count} photos to organize into {folders_count} folders")
+
+    @staticmethod
+    def show_progress(stats: ProcessStats) -> None:
+        st.write(f"Processing files: {stats.processed_files}/{stats.total_photos}")
+        if stats.skipped_files:
+            st.warning(f"Skipped {stats.skipped_files} files due to errors")
+        if stats.errors:
+            st.error(f"Encountered {stats.errors} errors")
 
 @dataclass
 class PhotoFile:
@@ -130,6 +153,8 @@ class PhotoOrganizer:
     def scan_photos(self) -> list[PhotoFile]:
         photo_files = []
         for file_path in self.source_dir.rglob("*"):
+            if file_path.name.startswith("._"):
+                continue
             if file_path.suffix.lower() in self.supported_extensions:
                 try:
                     date_taken = DateExtractor(file_path).get_date()
@@ -264,7 +289,7 @@ def get_directory_paths() -> tuple[Path | None, Path | None]:
 
 def process_organization(
     source_path: Path, sort_type: SortingType, create_year_parent: bool,
-) -> None:
+):
     organizer = PhotoOrganizer(source_path)
     photos = organizer.scan_photos()
     if not photos:
@@ -301,58 +326,96 @@ def render_directory_map(source_dir: Path, target_dir: Path) -> None:
 
 def main() -> None:
     setup_page()
-
+    status_container = st.container()
     left_col, right_col = st.columns([3, 2], gap="large")
 
     with left_col:
-        st.subheader("Configuration")
-        source_path, target_path = get_directory_paths()
+        # Make configuration section always visible with st.empty()
+        config_section = st.empty()
+        with config_section.container():
+            st.subheader("Configuration")
+            source_path, target_path = get_directory_paths()
 
-        if source_path:
-            st.subheader("Organization Settings")
-            sort_type = select_sort_type()
+            if source_path:
+                st.subheader("Organization Settings")
+                sort_type = select_sort_type()
 
-            create_year_parent = False
-            if sort_type != SortingType.YEARLY:
-                create_year_parent = st.checkbox(
-                    "Create year folder as parent", help="Example: 2024/2024-03_Photos",
-                )
-
-            delete_original = st.toggle(
-                "Delete original photos after organizing", value=False,
-            )
-            if delete_original:
-                st.warning("⚠️ Original photos will be deleted after organization")
-
-            if st.button("Start Organizing", type="primary"):
-                with st.spinner("Processing photos..."):
-                    organized = process_organization(
-                        source_path, sort_type, create_year_parent,
+                create_year_parent = False
+                if sort_type != SortingType.YEARLY:
+                    create_year_parent = st.checkbox(
+                        "Create year folder as parent",
+                        help="Example: 2024/2024-03_Photos",
                     )
-                    if organized:
-                        st.session_state.organized_photos = organized
-                        st.session_state.preview_shown = True
-                        st.rerun()
 
-            if st.session_state.get("preview_shown", False):
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(
-                        "Confirm Organization", type="primary", key="confirm_org",
-                    ):
-                        organizer = PhotoOrganizer(source_path)
-                        organizer.move_photos(
-                            st.session_state.organized_photos,
-                            target_path,
-                            delete_original,
+                delete_original = st.toggle(
+                    "Delete original photos after organizing",
+                    value=False,
+                )
+                if delete_original:
+                    st.warning("⚠️ Original photos will be deleted after organization")
+
+                # Add stats container
+                stats_container = st.empty()
+
+                if st.button("Preview organized photos", type="primary"):
+                    with st.spinner("Scanning photos..."):
+                        organized = process_organization(
+                            source_path, sort_type, create_year_parent,
                         )
-                        st.session_state.preview_shown = False
-                        st.success("✨ Photos organized successfully!")
-                        st.rerun()
-                with col2:
-                    if st.button("Cancel", type="secondary", key="cancel_org"):
-                        st.session_state.preview_shown = False
-                        st.rerun()
+                        if organized:
+                            photos_count = sum(len(photos) for photos in organized.values())
+                            with status_container:
+                                StatusManager.show_preview_stats(
+                                    photos_count=photos_count,
+                                    folders_count=len(organized)
+                                )
+                            st.session_state.organized_photos = organized
+                            st.session_state.preview_shown = True
+                            st.session_state.stats = ProcessStats(total_photos=photos_count)
+                            st.rerun()
+
+                if st.session_state.get("preview_shown", False):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(
+                                "Confirm Organization",
+                                type="primary",
+                                key="confirm_org",
+                        ):
+                            try:
+                                with st.spinner("Organizing photos..."):
+                                    organizer = PhotoOrganizer(source_path)
+                                    stats = st.session_state.get("stats")
+
+                                    with status_container:
+                                        st.info("Starting photo organization...")
+                                        organizer.move_photos(
+                                            st.session_state.organized_photos,
+                                            target_path,
+                                            delete_original,
+                                        )
+                                        if delete_original:
+                                            st.success("✨ Photos moved successfully!")
+                                        else:
+                                            st.success("✨ Photos copied successfully!")
+                                        st.write(
+                                            f"Processed {stats.processed_files}/{stats.total_photos} files "
+                                            f"in {stats.processed_folders} folders"
+                                        )
+
+                                    time.sleep(2)
+                                    st.session_state.preview_shown = False
+                                    st.session_state.organization_done = True
+                                    st.rerun()
+                            except Exception as exc:
+                                with status_container:
+                                    st.error(f"❌ Failed to organize photos: {str(exc)}")
+                                    import traceback
+                                    st.error(f"Details: {traceback.format_exc()}")
+                    with col2:
+                        if st.button("Cancel", type="secondary", key="cancel_org"):
+                            st.session_state.preview_shown = False
+                            st.rerun()
 
     with right_col:
         if st.session_state.get("preview_shown", False):
