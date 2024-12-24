@@ -1,19 +1,23 @@
 import logging
-from pathlib import Path
-from datetime import datetime
-from pillow_heif import register_heif_opener
-import shutil
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
 import os
-from enum import Enum
-import streamlit as st
 import re
+import shutil
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import streamlit as st
+from pillow_heif import register_heif_opener
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 register_heif_opener()
 
+class Photos(Enum):
+    FIRST_PHOTOS = 5
 
 class SortingType(Enum):
     YEARLY = "By Year (2024)"
@@ -34,9 +38,9 @@ class SeasonMapper:
         month = date.month
         if month in (12, 1, 2):
             return "Winter"
-        elif month in (3, 4, 5):
+        if month in (3, 4, 5):
             return "Spring"
-        elif month in (6, 7, 8):
+        if month in (6, 7, 8):
             return "Summer"
         return "Fall"
 
@@ -45,8 +49,9 @@ class DateExtractor:
     def __init__(self, photo_path: Path):
         self.photo_path = photo_path
 
-    def extract_from_heic(self) -> Optional[datetime]:
+    def extract_from_heic(self) -> datetime | None:
         from pillow_heif import HeifImageFile
+
         with HeifImageFile(self.photo_path) as heif_img:
             exif = heif_img.getexif()
             if not exif:
@@ -55,35 +60,38 @@ class DateExtractor:
             for tag in [306, 36867, 36868]:
                 if tag in exif:
                     try:
-                        return datetime.strptime(exif[tag], '%Y:%m:%d %H:%M:%S')
+                        return datetime.strptime(exif[tag], "%Y:%m:%d %H:%M:%S")
                     except (ValueError, TypeError):
                         continue
         return None
 
-    def extract_from_jpeg(self) -> Optional[datetime]:
+    def extract_from_jpeg(self) -> datetime | None:
         from exif import Image as ExifImage
-        with open(self.photo_path, 'rb') as image_file:
+
+        with open(self.photo_path, "rb") as image_file:
             image = ExifImage(image_file)
             if not image.has_exif:
                 return None
 
-            for attr in ['datetime_original', 'datetime', 'datetime_digitized']:
+            for attr in ["datetime_original", "datetime", "datetime_digitized"]:
                 if hasattr(image, attr):
                     try:
-                        return datetime.strptime(getattr(image, attr), '%Y:%m:%d %H:%M:%S')
+                        return datetime.strptime(
+                            getattr(image, attr), "%Y:%m:%d %H:%M:%S",
+                        )
                     except (ValueError, TypeError):
                         continue
         return None
 
-    def extract_from_filename(self) -> Optional[datetime]:
+    def extract_from_filename(self) -> datetime | None:
         patterns = [
-            (r'\d{8}', '%Y%m%d'),
-            (r'\d{4}-\d{2}-\d{2}', '%Y-%m-%d'),
-            (r'\d{4}_\d{2}_\d{2}', '%Y_%m_%d'),
-            (r'IMG-\d{8}', '%Y%m%d'),
-            (r'IMG_\d{8}', '%Y%m%d'),
-            (r'WA\d{8}', '%Y%m%d'),
-            (r'IMG_E\d{8}', '%Y%m%d'),
+            (r"\d{8}", "%Y%m%d"),
+            (r"\d{4}-\d{2}-\d{2}", "%Y-%m-%d"),
+            (r"\d{4}_\d{2}_\d{2}", "%Y_%m_%d"),
+            (r"IMG-\d{8}", "%Y%m%d"),
+            (r"IMG_\d{8}", "%Y%m%d"),
+            (r"WA\d{8}", "%Y%m%d"),
+            (r"IMG_E\d{8}", "%Y%m%d"),
         ]
 
         filename = self.photo_path.stem
@@ -91,9 +99,9 @@ class DateExtractor:
             match = re.search(pattern, filename)
             if match:
                 date_str = match.group(0)
-                for prefix in ['IMG-', 'IMG_', 'IMG_E', 'WA']:
+                for prefix in ["IMG-", "IMG_", "IMG_E", "WA"]:
                     if date_str.startswith(prefix):
-                        date_str = date_str[len(prefix):]
+                        date_str = date_str[len(prefix) :]
                 try:
                     return datetime.strptime(date_str, date_format)
                 except ValueError:
@@ -101,9 +109,9 @@ class DateExtractor:
         return None
 
     def get_date(self) -> datetime:
-        if self.photo_path.suffix.lower() == '.heic':
+        if self.photo_path.suffix.lower() == ".heic":
             date = self.extract_from_heic()
-        elif self.photo_path.suffix.lower() in ['.jpg', '.jpeg']:
+        elif self.photo_path.suffix.lower() in [".jpg", ".jpeg"]:
             date = self.extract_from_jpeg()
         else:
             date = None
@@ -115,23 +123,24 @@ class DateExtractor:
 
 
 class PhotoOrganizer:
-    def __init__(self, source_dir: Path):
+    def __init__(self, source_dir: Path) -> None:
         self.source_dir = source_dir
-        self.supported_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+        self.supported_extensions = {".jpg", ".jpeg", ".png", ".heic"}
 
-    def scan_photos(self) -> List[PhotoFile]:
+    def scan_photos(self) -> list[PhotoFile]:
         photo_files = []
-        for file_path in self.source_dir.rglob('*'):
+        for file_path in self.source_dir.rglob("*"):
             if file_path.suffix.lower() in self.supported_extensions:
                 try:
                     date_taken = DateExtractor(file_path).get_date()
                     photo_files.append(PhotoFile(file_path, date_taken))
                 except Exception as e:
-                    st.error(f"Error processing {file_path}: {str(e)}")
+                    st.error(f"Error processing {file_path}: {e!s}")
         return photo_files
 
-    def organize_photos(self, photos: List[PhotoFile], sort_type: SortingType,
-                        create_year_parent: bool) -> Dict[str, List[PhotoFile]]:
+    def organize_photos(
+        self, photos: list[PhotoFile], sort_type: SortingType, create_year_parent: bool,
+    ) -> dict[str, list[PhotoFile]]:
         organized = {}
         for photo in photos:
             category = self._get_category(photo, sort_type, create_year_parent)
@@ -140,22 +149,28 @@ class PhotoOrganizer:
             organized[category].append(photo)
         return organized
 
-    def _get_category(self, photo: PhotoFile, sort_type: SortingType, create_year_parent: bool) -> str:
-        year = photo.date_taken.strftime('%Y')
+    def _get_category(
+        self, photo: PhotoFile, sort_type: SortingType, create_year_parent: bool,
+    ) -> str:
+        year = photo.date_taken.strftime("%Y")
         if sort_type == SortingType.YEARLY:
             return f"{year}_Photos"
 
         category_formats = {
             SortingType.MONTHLY: lambda dt: f"{dt.strftime('%Y-%m')}_Photos",
             SortingType.DAILY: lambda dt: f"{dt.strftime('%Y-%m-%d')}_Photos",
-            SortingType.SEASON: lambda dt: f"{dt.strftime('%Y')}_{SeasonMapper.get_season(dt)}_Photos"
+            SortingType.SEASON: lambda dt: f"{dt.strftime('%Y')}_{SeasonMapper.get_season(dt)}_Photos",
         }
 
         category = category_formats[sort_type](photo.date_taken)
         return f"{year}/{category}" if create_year_parent else category
 
-    def move_photos(self, organized_photos: Dict[str, List[PhotoFile]], target_dir: Path,
-                    delete_original: bool) -> None:
+    def move_photos(
+        self,
+        organized_photos: dict[str, list[PhotoFile]],
+        target_dir: Path,
+        delete_original: bool,
+    ) -> None:
         for category, photos in organized_photos.items():
             category_dir = target_dir / category
             category_dir.mkdir(parents=True, exist_ok=True)
@@ -168,10 +183,10 @@ class PhotoOrganizer:
                     else:
                         shutil.copy2(str(photo.path), str(new_path))
                 except Exception as e:
-                    st.error(f"Error processing {photo.path}: {str(e)}")
+                    st.error(f"Error processing {photo.path}: {e!s}")
 
 
-def create_folder_map(path: Path, prefix: str = "", is_last: bool = True) -> str:
+def create_folder_map(path: Path, prefix: str = "") -> str:
     if not path.exists():
         return ""
 
@@ -200,26 +215,28 @@ def create_folder_map(path: Path, prefix: str = "", is_last: bool = True) -> str
     return "\n".join(filter(None, tree))
 
 
-def setup_page():
+def setup_page() -> None:
     st.set_page_config(page_title="Photos Organizer", page_icon="📸", layout="wide")
     st.title("📸 Photo Organizer")
     st.caption("Organize your photos by year, season, month, or day - you choose how!")
 
 
 def select_sort_type() -> SortingType:
-    selected = st.radio("Sort photos by:",
-                        ["Year", "Season", "Month", "Day"],
-                        horizontal=True,
-                        format_func=lambda x: f"By {x}")
+    selected = st.radio(
+        "Sort photos by:",
+        ["Year", "Season", "Month", "Day"],
+        horizontal=True,
+        format_func=lambda x: f"By {x}",
+    )
     return {
         "Year": SortingType.YEARLY,
         "Season": SortingType.SEASON,
         "Month": SortingType.MONTHLY,
-        "Day": SortingType.DAILY
+        "Day": SortingType.DAILY,
     }[selected]
 
 
-def get_directory_paths() -> Tuple[Optional[Path], Optional[Path]]:
+def get_directory_paths() -> tuple[Path | None, Path | None]:
     source_dir = st.text_input("Source Directory Path")
     if not source_dir:
         return None, None
@@ -245,7 +262,9 @@ def get_directory_paths() -> Tuple[Optional[Path], Optional[Path]]:
     return source_path, target_path
 
 
-def process_organization(source_path: Path, sort_type: SortingType, create_year_parent: bool):
+def process_organization(
+    source_path: Path, sort_type: SortingType, create_year_parent: bool,
+) -> None:
     organizer = PhotoOrganizer(source_path)
     photos = organizer.scan_photos()
     if not photos:
@@ -255,20 +274,20 @@ def process_organization(source_path: Path, sort_type: SortingType, create_year_
     return organizer.organize_photos(photos, sort_type, create_year_parent)
 
 
-def render_preview(organized_photos: dict):
+def render_preview(organized_photos: dict) -> None:
     st.subheader("Preview of Photo Organization")
     for folder, photos in sorted(organized_photos.items()):
         st.markdown(f"### 📁 {folder}")
         st.write(f"Contains {len(photos)} photos")
         with st.expander("See photos"):
-            for photo in photos[:5]:
+            for photo in photos[:Photos.FIRST_PHOTOS.value]:
                 st.write(f"📄 {photo.path.name}")
-            if len(photos) > 5:
-                st.write(f"... and {len(photos) - 5} more photos")
+            if len(photos) > Photos.FIRST_PHOTOS.value:
+                st.write(f"... and {len(photos) - Photos.FIRST_PHOTOS.value} more photos")
         st.divider()
 
 
-def render_directory_map(source_dir: Path, target_dir: Path):
+def render_directory_map(source_dir: Path, target_dir: Path) -> None:
     st.subheader("Directory Structure Map")
     if source_dir:
         st.markdown("### Source Directory Structure")
@@ -280,7 +299,7 @@ def render_directory_map(source_dir: Path, target_dir: Path):
         st.write("Enter a source directory path to see its structure")
 
 
-def main():
+def main() -> None:
     setup_page()
 
     left_col, right_col = st.columns([3, 2], gap="large")
@@ -296,29 +315,37 @@ def main():
             create_year_parent = False
             if sort_type != SortingType.YEARLY:
                 create_year_parent = st.checkbox(
-                    "Create year folder as parent",
-                    help="Example: 2024/2024-03_Photos"
+                    "Create year folder as parent", help="Example: 2024/2024-03_Photos",
                 )
 
-            delete_original = st.toggle("Delete original photos after organizing", value=False)
+            delete_original = st.toggle(
+                "Delete original photos after organizing", value=False,
+            )
             if delete_original:
                 st.warning("⚠️ Original photos will be deleted after organization")
 
             if st.button("Start Organizing", type="primary"):
                 with st.spinner("Processing photos..."):
-                    organized = process_organization(source_path, sort_type, create_year_parent)
+                    organized = process_organization(
+                        source_path, sort_type, create_year_parent,
+                    )
                     if organized:
                         st.session_state.organized_photos = organized
                         st.session_state.preview_shown = True
                         st.rerun()
 
-            if st.session_state.get('preview_shown', False):
+            if st.session_state.get("preview_shown", False):
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("Confirm Organization", type="primary", key="confirm_org"):
+                    if st.button(
+                        "Confirm Organization", type="primary", key="confirm_org",
+                    ):
                         organizer = PhotoOrganizer(source_path)
-                        organizer.move_photos(st.session_state.organized_photos,
-                                              target_path, delete_original)
+                        organizer.move_photos(
+                            st.session_state.organized_photos,
+                            target_path,
+                            delete_original,
+                        )
                         st.session_state.preview_shown = False
                         st.success("✨ Photos organized successfully!")
                         st.rerun()
@@ -328,7 +355,7 @@ def main():
                         st.rerun()
 
     with right_col:
-        if st.session_state.get('preview_shown', False):
+        if st.session_state.get("preview_shown", False):
             render_preview(st.session_state.organized_photos)
         else:
             render_directory_map(source_path, target_path)
